@@ -136,3 +136,5 @@ Clean_Set_Updated/
 Conv_Model/
 Checkpointing/
 Processed_Data/
+
+capcon_env/
