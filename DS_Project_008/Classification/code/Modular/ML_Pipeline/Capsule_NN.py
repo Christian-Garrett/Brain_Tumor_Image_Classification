@@ -463,9 +463,13 @@ def evaluate_cap_model(self, model_folder_name=None):
 
     num_epochs = 1
     batch_size = 50
-    save_dir = \
+    existing_model = \
         os.path.join(module_path,
-                     f"Output/Checkpointing/{model_folder_name}/Capsule") # "Capsule"
+                     f"Output/Checkpointing/{model_folder_name}/Capsule")
+    new_model = \
+        os.path.join(module_path,
+                     f"Output/Checkpointing/New_Model/Capsule")
+    save_dir = existing_model if model_folder_name else new_model
 
     train_len = len(self.cap_X_train_scaled)
     test_len = len(self.cap_X_test_scaled)

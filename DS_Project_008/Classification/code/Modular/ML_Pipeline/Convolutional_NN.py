@@ -8,10 +8,6 @@ import cloudpickle as pickle
 from tensorflow import keras
 from sklearn.metrics import confusion_matrix
 from keras_tuner.tuners import RandomSearch  #.tuners
-from sklearn.metrics import (accuracy_score,
-                             precision_score,
-                             recall_score,
-                             f1_score)
 
 module_path = Path(__file__).parents[1]
 sys.path.append(str(module_path))
@@ -147,7 +143,6 @@ def evaluate_conv_model(self, model_name=None):
             conv_tuner.get_best_hyperparameters()[0].values
         print(f'Convolutional Model Best Params: {self.best_conv_hyperparameters}')
 
-
         # define tuner search params
         tuner_model_dir = os.path.join(module_path, "Output/Conv_Tuner/")
 
@@ -155,7 +150,6 @@ def evaluate_conv_model(self, model_name=None):
         output = tuner_model_dir + 'tuner_122224.pkl'
         with open(output, "wb") as f:
             pickle.dump(conv_tuner, f)
-
 
         best_params = conv_tuner.get_best_hyperparameters()[0].values
         print(f'\nBest Model Params: {best_params}\n')
