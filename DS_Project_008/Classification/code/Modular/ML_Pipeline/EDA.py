@@ -1,119 +1,141 @@
-import datetime, os
+import os
 import cv2
+import sys
+import torch
+import random
 import numpy as np
-import random 
+from pathlib import Path
+import matplotlib.pyplot as plt
 
-from collections import defaultdict
+module_path = Path(__file__).parents[1]
+sys.path.append(str(module_path))
 
-
-
-class EDA:
-
-    def __init__(self, cats, dir_path):
-
-        self.categories = cats
-        self.dirname = dir_path
-        self.total_images = 0
-        self.image_data = self.load_full_data_set()
-        self.image_dim_dict = self.create_dim_dict()
+from ML_Pipeline.Config import *
 
 
-    # Load full image set and append class labels
-    def load_full_data_set(self):
+def get_image_data(self, img_set, img):
 
-        data = []
-        for category in self.categories:
-            path = os.path.join(self.dirname, category)
-            num_imgs = len(os.listdir(path))
-            self.total_images += num_imgs
-            print('There were {} images loaded in from the {} data set' .format(num_imgs, category))
-            class_num = self.categories.index(category)
-            for img in os.listdir(path):
-                try:
-                    img_array = cv2.imread(os.path.join(path, img), cv2.IMREAD_GRAYSCALE)
-                    #img_resize = cv2.resize(img_array, (resize, resize))
-                    data.append([img_array, class_num])
-                except Exception as e:
-                    pass
-
-        return data 
+    try:
+        img_folder = os.path.join(self.dirname, img_set)
+        img_pixel_array = cv2.imread(os.path.join(img_folder, img),
+                                     cv2.IMREAD_GRAYSCALE)
+        img_shape = img_pixel_array.shape
+        self.image_shape_counts[img_shape] += 1
+        self.image_shape_areas[img_pixel_array.shape] = \
+            [img_shape[0] * img_shape[1]]
+        label_encoded_target_var = IMAGE_FOLDERS.index(img_set)
+        return [img_pixel_array, label_encoded_target_var]
+    
+    except Exception as e:
+        return None
 
 
-    def create_dim_dict(self):
+def load_brain_scans(self):
 
-        # Create a dictionary with a count of each image dimension in the data set
-        np_image_data = np.array(self.image_data, dtype=object)
-        np_images = np_image_data[:,0]
-        dim_dict = defaultdict(int)
-        for np_img in np_images:
-            dim_dict[np_img.shape] += 1
+    # Load image pixel data and append class labels
+    self.image_pixel_data = \
+        [self.get_image_data(image_set, img)
+         for image_set in IMAGE_FOLDERS
+         for img in os.listdir(os.path.join(self.dirname, image_set))]
+    
+    self.total_images = len(self.image_pixel_data)
 
-        temp_dict = {}
-        # Get the area of each image dimension in the data set
-        img_dim_list = list(dim_dict.keys())
-        for item in img_dim_list:
-            size = item[0] * item[1]
-            temp_dict[item] = [size]
+    self.label_data = np.asarray([i[1] for i in self.image_pixel_data])
 
-        # Merge the two dictionaries together
-        for img in img_dim_list:
-            temp_dict[img].append(dim_dict[img])
+    self.target_label_dict = \
+        {k:v for k,v in zip(IMAGE_FOLDERS, np.unique(self.label_data))}
 
-        return temp_dict
+    # Dictionary that contains image shape counts, and areas
+    self.image_shape_dict = \
+        {key: self.image_shape_areas[key] + [self.image_shape_counts[key]]
+         for key in self.image_shape_areas}
 
 
-    def get_dim_stats(self):
+def get_image_info(self):
 
-        # Find the dimension with the highest number of occurrences
-        max_val = max(self.image_dim_dict.values(), key=lambda e: e[1])
+    shape_info_tuples = self.image_shape_dict.values()
+    top_occuring_shape_info = max(shape_info_tuples, key=lambda e: e[1])
+    image_shapes_list = list(self.image_shape_dict.keys())
+    shape_info_list = list(shape_info_tuples)
+    position = shape_info_list.index(top_occuring_shape_info)
+    top_image_shape = image_shapes_list[position]
 
-        key_list = list(self.image_dim_dict.keys())
-        val_list = list(self.image_dim_dict.values())
+    print(f'\n The most frequently occuring image shape in the input data \
+is {top_image_shape} which shows up \
+{round((top_occuring_shape_info[1]/self.total_images)*100,2)}% of the time \
+with {top_occuring_shape_info[1]} occurrences.')
+    
+    # save a test image to an output folder and print out the shape and pixel info
+    plt.imshow(self.image_pixel_data[0][0], cmap="gray")
+    plt.savefig(os.path.join(module_path, "Output/Data_Exploration/test_img_II_.png"))
+    plt.clf()
 
-        position = val_list.index(max_val)
-        result = key_list[position]
-
-        return result, max_val[1]
-
-
-    def convert_full_data_set(self, dim, channels):
-
-        # Load full image set and append class labels
-        data = []
-        for img in self.image_data:
-            try:
-                image = img[0]
-                class_num = img[1]
-                img_resize = cv2.resize(image, (dim, dim))
-                data.append([img_resize, class_num])
-            except Exception as e:
-                pass
-        
-        # Shuffle the data
-        random.shuffle(data)
-        for sample in data[:10]:
-            print('Class Label Num: {} ' .format(sample[1]))
-
-
-        X = []
-        y = []
-        # Reshape the data so that it has the correct number of channels for model input
-        for features, label in data:
-            X.append(features)
-            y.append(label)
-
-        X = np.array(X)
-        X = X.reshape(len(data), dim, dim, channels)
-
-        return X, y
+    print(f'\nTest Image Shape: {self.image_pixel_data[0][0].shape}')
+    print(f'Test Image Pixel Min Value: {self.image_pixel_data[0][0].min()}, \
+Max Value: {self.image_pixel_data[0][0].max()}\n')
+    
+    # Save Image Intensity Distribution to the Output Folder
+    plt.figure(figsize=(10, 10))
+    plt.hist(self.image_pixel_data[0][0], histtype='bar', bins=10)
+    plt.title("Histogram of Pixel Intensity")
+    plt.savefig(os.path.join(module_path,
+                             "Output/Data_Exploration/original_test_img_intensity_hist_.png"))
+    plt.clf()
 
 
+def resize_images(self):  ## todo: add exception handling map function
 
-    def get_data(self):
-        return self.image_data
+    self.conv_data = [[cv2.resize(img[0], (self.conv_resize, self.conv_resize)), img[1]]
+                       for img in self.image_pixel_data]
 
-    def get_dim_dict(self):
-        return self.image_dim_dict
+    self.cap_data = [[cv2.resize(img[0], (self.cap_resize, self.cap_resize)), img[1]]
+                      for img in self.image_pixel_data]    
 
-    def get_total_images(self):
-        return self.total_images
+
+def shuffle_images(self):
+    
+    random.shuffle(self.conv_data)
+    random.shuffle(self.cap_data)
+
+
+def reshape_image(self, type='conv'):
+
+    X_data, y_data = f"{type}_X", f"{type}_y"
+    dim_size = f"{type}_resize"
+    data = self.__getattribute__(f"{type}_data")
+
+    pixel_features, image_labels = zip(*data)
+    pixel_features = list(pixel_features)
+    self.__setattr__(y_data, list(image_labels))
+
+    pixel_features = np.array(pixel_features)
+    pixel_features = \
+        pixel_features.reshape(len(data),
+                               self.__getattribute__(dim_size),
+                               self.__getattribute__(dim_size),
+                               self.color_channels)
+    
+    self.__setattr__(X_data, pixel_features)
+
+
+def reshape_images(self):
+
+    self.reshape_image('conv')
+    self.reshape_image('cap')
+
+
+def save_processed_image(self, type='conv'):
+
+    feature_name = f"{type}_full_data_features_.pt"
+    feature_path = os.path.join(module_path, f"Output/Processed_Data/{feature_name}")
+    torch.save(self.__getattribute__(f"{type}_X"), feature_path)
+
+    label_name = f"{type}_full_data_labels_.pt"
+    label_path = os.path.join(module_path, f"Output/Processed_Data/{label_name}") 
+    torch.save(self.__getattribute__(f"{type}_y"), label_path)
+
+
+def save_processed_images(self):
+    
+    self.save_processed_image('conv')
+    self.save_processed_image('cap')

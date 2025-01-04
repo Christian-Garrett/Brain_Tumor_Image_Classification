@@ -1,196 +1,224 @@
-import torch
-import pandas as pd
-import tensorflow as tf
+import os
+import sys
+import time
 import numpy as np
-import keras
-import kerastuner
-import pickle
-
+import pandas as pd
+from pathlib import Path
+import cloudpickle as pickle
 from tensorflow import keras
-from tensorflow.keras.layers import Dense, Dropout, Activation, Flatten, Conv2D, MaxPooling2D
-from kerastuner.engine.hyperparameters import HyperParameters
-from kerastuner.tuners import RandomSearch
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.utils import class_weight
+from sklearn.metrics import confusion_matrix
+from keras_tuner.tuners import RandomSearch  #.tuners
+from sklearn.metrics import (accuracy_score,
+                             precision_score,
+                             recall_score,
+                             f1_score)
+
+module_path = Path(__file__).parents[1]
+sys.path.append(str(module_path))
+
+from ML_Pipeline.Config import *
 
 
+def model_tuner(hp):
 
-def conv_model_tuner(hp):
+    tuner_model = keras.Sequential()
+    tuner_model.add(keras.layers.Input(shape=(256, 256, 1)))
+    tuner_model.add(keras.layers.Conv2D(hp.Int("input_units", min_value=32, max_value=64, step=32),
+                                              (4, 4),
+                                              padding='same',
+                                              activation='relu'))
+    tuner_model.add(keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
+    tuner_model.add(keras.layers.Dropout(0.1))
+    tuner_model.add(keras.layers.Conv2D(hp.Int("middle_units_1", 64, 128, 32),
+                                       (3, 3),
+                                       padding='same',
+                                       activation='relu'))
+    tuner_model.add(keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
+    tuner_model.add(keras.layers.Dropout(0.1))
+    tuner_model.add(keras.layers.Conv2D(hp.Int("middle_units_2", 64, 128, 32),
+                                       (2, 2),
+                                       padding='same',
+                                       activation='relu'))
+    tuner_model.add(keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
+    tuner_model.add(keras.layers.Dropout(0.2))
+    tuner_model.add(keras.layers.Conv2D(hp.Int("middle_units_3", 96, 160, 32),
+                                       (2, 2),
+                                       padding='same',
+                                       activation='relu'))
+    tuner_model.add(keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
+    tuner_model.add(keras.layers.Dropout(0.3))
+    tuner_model.add(keras.layers.Flatten())
+    tuner_model.add(keras.layers.Dense(hp.Int("output_units", 128, 512, 32),
+                                      activation='relu'))
+    tuner_model.add(keras.layers.Dropout(0.3))
+    tuner_model.add(keras.layers.Dense(4, activation='softmax'))
 
-    t_model = tf.keras.Sequential()
-    t_model.add(tf.keras.layers.Input(shape=(256,256,1)))
-    t_model.add(tf.keras.layers.Conv2D(hp.Int("input_units", min_value=32, max_value=64, step=32), (4, 4), padding='same', activation='relu'))
-    t_model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
-    t_model.add(tf.keras.layers.Dropout(0.1))
-    t_model.add(tf.keras.layers.Conv2D(hp.Int("middle_units_1", 64, 128, 32), (3, 3), padding='same', activation='relu'))
-    t_model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
-    t_model.add(tf.keras.layers.Dropout(0.1))
-    t_model.add(tf.keras.layers.Conv2D(hp.Int("middle_units_2", 64, 128, 32), (2, 2), padding='same', activation='relu'))
-    t_model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
-    t_model.add(tf.keras.layers.Dropout(0.2))
-    t_model.add(tf.keras.layers.Conv2D(hp.Int("middle_units_3", 96, 160, 32), (2, 2), padding='same', activation='relu'))
-    t_model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2), strides=2, padding='same'))
-    t_model.add(tf.keras.layers.Dropout(0.3))
-    t_model.add(tf.keras.layers.Flatten())
-    t_model.add(tf.keras.layers.Dense(hp.Int("output_units", 128, 512, 32), activation='relu'))
-    t_model.add(tf.keras.layers.Dropout(0.3))
-    t_model.add(tf.keras.layers.Dense(4, activation='softmax'))
-
-    # compile the model
-    opt = tf.keras.optimizers.Adam(beta_1=0.9, beta_2=0.999, learning_rate=hp.Float('learning_rate'
-                                                                            ,min_value=0.0005
-                                                                            ,max_value=0.001
-                                                                            ,default=0.001))
+    # compile the tuner model
+    opt = keras.optimizers.Adam(beta_1=0.9,
+                                beta_2=0.999,
+                                learning_rate=hp.Float('learning_rate',
+                                                        min_value=0.0005,
+                                                        max_value=0.001,
+                                                        default=0.001))
                                                                 
-    t_model.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['accuracy'])
+    tuner_model.compile(optimizer=opt,
+                        loss='categorical_crossentropy',
+                        metrics=['accuracy'])
 
-    return t_model
-
-
-
-class Convolutional_NN:
+    return tuner_model
 
 
-    def __init__(self, features_path, labels_path, tuner_params = {}, test_size=0.2, rand_state=25):
+def get_model_summary(model):
 
-        self.features_path = features_path
-        self.features_filepath = f"Classification/code/Modular/Output/Processed_Data/{self.features_path}" 
-        self.feature_data = torch.load(self.features_filepath)
-        self.labels_path = labels_path
-        self.labels_filepath = f"Classification/code/Modular/Output/Processed_Data/{self.labels_path}"
-        self.labels_data = torch.load(self.labels_filepath)
-        self.class_weights = self.compute_weights()
-        self.test_size = test_size
-        self.rand_state = rand_state
-        if tuner_params:
-            self.tuner = RandomSearch(hypermodel = conv_model_tuner
-                                      ,objective = tuner_params['objective']
-                                      ,max_trials = tuner_params['max_trials']
-                                      ,executions_per_trial = tuner_params['executions_per_trial']
-                                      ,directory = tuner_params['directory'])
-        self.X_train, self.X_test, self.y_train, self.y_test = self.split_data() 
-        self.X_scaled_train, self.X_scaled_test, self.y_enc_train, self.y_enc_test = self.create_processed_data() 
-
-        self.X_scaled_train_df = pd.DataFrame()
-        self.X_scaled_test_df = pd.DataFrame()
-
-        print('Feature Data Shape: {}' .format(self.feature_data.shape))
-        print('Training Data Shape: {}' .format(self.X_train.shape))
+    summary = model.summary()
+    print(f'\nFit Model Summary: {summary}\n')
 
 
+def get_model_metrics(self, model_):
 
-    def tuner_search(self, param_dict):
+    score = model_.evaluate(self.conv_X_test_scaled, np.asarray(self.conv_y_test_OHE), verbose=0)
+    print(f'\nTest loss: {score[0]} / Test accuracy: {score[1]}\n')
 
-        # run the tuner search object
-        self.tuner.search(x = self.X_scaled_train
-                          ,y = self.y_enc_train
-                          ,epochs = param_dict['epochs']
-                          ,batch_size = param_dict['batch_size']
-                          ,steps_per_epoch = self.X_scaled_train.shape[0] // param_dict['batch_size']
-                          ,validation_data = (self.X_scaled_test, self.y_enc_test)
-                          ,class_weight = self.class_weights)
+    predictions = model_.predict([self.conv_X_test_scaled]) 
+    self.conv_test_prediction_list = [np.argmax(predictions[i]) for i in range(len(predictions))]
+    con_mat = confusion_matrix(self.conv_y_test, self.conv_test_prediction_list)
+    con_df = pd.DataFrame(data=con_mat, index=IMAGE_FOLDERS, columns=IMAGE_FOLDERS)
+    with pd.option_context('display.max_rows', None,
+                           'display.max_columns', None,
+                           'display.width', 1000):
+        print(f'\nConfusion Matrix:\n {con_df}\n')
 
 
-        # save the tuner object to an output file
-        output = param_dict['tuner_directory'] + param_dict['tuner_name'] + '.pkl'
+def plot_model_checkpoints(model):  ## todo: add this function
+    return None
+
+
+def load_model_from_file(model_name):
+
+    model_path = f"Output/Conv_Model/{model_name}_cnn_tumor_brain_scan.model"
+    model_object = os.path.join(module_path, model_path)
+
+    try:
+        conv_model = keras.models.load_model(model_object)
+        print(f"Previously saved conv model loaded successfully: {conv_model}")
+
+    except OSError:
+        print(f"Could not open/read file: {model_name}")
+        sys.exit()
+
+    return conv_model
+
+
+def evaluate_conv_model(self, model_name=None):
+
+    if(model_name):
+        model = load_model_from_file(model_name)
+
+    ## keras objects are not copying properly to class attributes -
+    else:
+        # define tuner model params
+        tuner_search_results_dir = \
+            os.path.join(module_path,
+                        f"Output/Log_Directory/Convolutional/{int(time.time())}_")
+
+        # initialize tuner object  - # 4, 1, 3
+        conv_tuner = \
+            RandomSearch(hypermodel=model_tuner,
+                        objective='val_accuracy',
+                        max_trials=1,
+                        executions_per_trial=1,
+                        directory=tuner_search_results_dir,
+                        project_name='refactor')
+
+        search_summary = conv_tuner.search_space_summary(extended=False)
+        print(f'Hyperparameter Tuner Search Space: {search_summary}')
+
+        # tuner search
+        conv_tuner.search(x=self.conv_X_train_scaled,
+                            y=self.conv_y_train_OHE,
+                            epochs=1,
+                            batch_size=40,
+                            steps_per_epoch=self.conv_X_train_scaled.shape[0] // 40,
+                            class_weight=self.class_weights,
+                            validation_data=(self.conv_X_test_scaled, self.conv_y_test_OHE))
+        
+        # tuner search results
+        self.best_conv_hyperparameters = \
+            conv_tuner.get_best_hyperparameters()[0].values
+        print(f'Convolutional Model Best Params: {self.best_conv_hyperparameters}')
+
+
+        # define tuner search params
+        tuner_model_dir = os.path.join(module_path, "Output/Conv_Tuner/")
+
+        # save tuner obect
+        output = tuner_model_dir + 'tuner_122224.pkl'
         with open(output, "wb") as f:
-            pickle.dump(self.tuner, f)
+            pickle.dump(conv_tuner, f)
 
 
-        return self.tuner.get_best_hyperparameters()[0].values
+        best_params = conv_tuner.get_best_hyperparameters()[0].values
+        print(f'\nBest Model Params: {best_params}\n')
+        models = conv_tuner.get_best_models(num_models=1)
+        model = models[0]
 
+        model_checkpoints = \
+            keras.callbacks.ModelCheckpoint(CONV_CHECKPT_LOG_DIR,
+                                            monitor='val_accuracy',
+                                            verbose=1,
+                                            save_best_only=True,
+                                            mode='max')
+        tensorboard = \
+            keras.callbacks.TensorBoard(CONV_CHECKPT_LOG_DIR,
+                                        histogram_freq=0,
+                                        write_graph=True,
+                                        write_images=True)
+    
+        conv_model_callbacks = [model_checkpoints, tensorboard]
 
-    def create_processed_data(self):
+        num_epochs = 40
+        self.conv_training_history = \
+            model.fit(x=self.conv_X_train_scaled,
+                      y=self.conv_y_train_OHE,
+                      validation_data=(self.conv_X_test_scaled, self.conv_y_test_OHE),
+                      callbacks=conv_model_callbacks,
+                      class_weight=self.class_weights,
+                      epochs=num_epochs)
 
-        # Set the data type
-        X_train_data = self.X_train.astype('float32') 
-        X_test_data = self.X_test.astype('float32')
+    get_model_summary(model)
+    self.get_model_metrics(model_=model)
+    self.print_classification_scores('conv')
 
-        # Apply scaling being careful to avoid adding any data leakage into the test set
-        sc = StandardScaler()
+    #### plot_model_checkpoints() ####
+    '''# list metrics returned from callback function
+    print('\ncallback function keys: {}\n' .format(self.conv_training_history.history.keys()))
 
-        # Reshape the training data for the scaling transform
-        X_train_shape = X_train_data.shape
+    # plot loss metric
+    plt.plot(self.conv_training_history.history['loss'], '--')
+    plt.plot(self.conv_training_history.history['val_loss'], '--')
+    plt.title('{} Model loss per epoch'.format(Mod_Num))
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'evaluation'])  
+    plt.savefig(os.path.join(module_path, "Output/Model_Evaluation/Convolutional/loss_metric_.png"))
+    plt.clf()
 
-        X_train_dimlen_1 = X_train_shape[0]
-        X_train_dimlen_2 = X_train_shape[1]
-        X_train_dimlen_3 = X_train_shape[2]
-        X_train_dimlen_4 = X_train_shape[3]
+    # plot accuracy metric
+    plt.plot(self.conv_training_history.history['accuracy'], '--')
+    plt.plot(self.conv_training_history.history['val_accuracy'], '--')
+    plt.title('{} Model accuracy per epoch'.format(Mod_Num))
+    plt.ylabel('loss')
+    plt.xlabel('epoch')
+    plt.legend(['train', 'evaluation'])  
+    plt.savefig(os.path.join(module_path, "Output/Model_Evaluation/Convolutional/accuracy_metric.png"))
+    plt.clf()'''
 
-        X_train_two_dim = self.X_train.reshape(X_train_dimlen_1 * X_train_dimlen_2 * X_train_dimlen_3, 1) 
-        
-        # Scale the training data
-        sc_X_train = sc.fit_transform(X_train_two_dim)
+    # save the model if this is a new build
+    if(not model_name):
+        MOD_NUM = 'Model_122324' 
+        save_path = \
+            os.path.join(module_path,
+                            f"Output/Conv_Model/{MOD_NUM}_cnn_tumor_brain_scan.model")
 
-        ## Converting from array to dataframe for detailed observation
-        self.X_scaled_train_df = pd.DataFrame(data = sc_X_train)
-
-        # Reshape the data back to original format for the model
-        sc_X_train = sc_X_train.reshape(X_train_dimlen_1, X_train_dimlen_2, X_train_dimlen_3, X_train_dimlen_4)
-   
-        ## Mapping learnt on the continuous features
-        sc_map = {'mean':sc.mean_, 'std':np.sqrt(sc.var_)}
-
-        ## Scaling the test set by transforming the mapping obtained through the training set
-        X_test_shape = X_test_data.shape
-
-        X_test_dimlen_1 = X_test_shape[0]
-        X_test_dimlen_2 = X_test_shape[1]
-        X_test_dimlen_3 = X_test_shape[2]
-        X_test_dimlen_4 = X_test_shape[3]
-
-        # Reshape the data for the tranform
-        X_test_padded = np.zeros((X_test_dimlen_1, X_test_dimlen_2, X_test_dimlen_3, X_test_dimlen_4))
-        X_test_two_dim = self.X_test.reshape(X_test_dimlen_1 * X_test_dimlen_2 * X_test_dimlen_3, X_test_dimlen_4) 
-        
-        # Scale the test data using the mapping
-        sc_X_test = sc.transform(X_test_two_dim)
-
-        ## Converting test arrays to dataframes for closer inspection
-        self.X_scaled_test_df = pd.DataFrame(data = sc_X_test)
-
-        # Reshape the data back to the original format for the model
-        sc_X_test = sc_X_test.reshape(X_test_dimlen_1, X_test_dimlen_2, X_test_dimlen_3, X_test_dimlen_4)
-
-        # One hot encode the labels for the model
-        enc_y_train = tf.keras.utils.to_categorical(self.y_train)
-        enc_y_test = tf.keras.utils.to_categorical(self.y_test)
-
-        return sc_X_train, sc_X_test, enc_y_train, enc_y_test
-
-    def compute_weights(self):
-
-        # Set the training class weight proportions in case the data could not be balanced using the augmentation step
-        class_weights = {}
-        weight_classes = class_weight.compute_class_weight(class_weight='balanced', classes=np.unique(self.labels_data), y=self.labels_data)
-        for i in range(len(weight_classes)):
-            class_weights.update({i:weight_classes[i]})
-
-        return class_weights
-
-    def split_data(self):
-
-        X_train, X_test, y_train, y_test = train_test_split(self.feature_data, self.labels_data, test_size = self.test_size, random_state = self.rand_state)
-        return X_train, X_test, y_train, y_test
-
-    def get_raw_features(self):
-        return self.X_train, self.X_test
-
-    def get_raw_labels(self):
-        return self.y_train, self.y_test  
-
-    def get_features(self):
-        return self.X_scaled_train, self.X_scaled_test
-
-    def get_labels(self):
-        return self.y_enc_train, self.y_enc_test  
-
-    def get_weights(self):
-        return self.class_weights
-
-    def get_tuner(self):
-        return self.tuner
-
-    def get_best_params(self):
-        return self.best_model_params
+        model.save(save_path)
+        print("model saved successfully")

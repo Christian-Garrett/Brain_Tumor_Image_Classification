@@ -138,3 +138,5 @@ Checkpointing/
 Processed_Data/
 
 capcon_env/
+cpcn_env/
+scratch.ipynb
